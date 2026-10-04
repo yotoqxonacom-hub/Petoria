@@ -1,6 +1,6 @@
 # Completed Tasks: Nestar → Petoria
 
-> **Status as of 2026-10-04:** Phase 1 (safe rename layer) is complete. Domain refactor not started.
+> **Status as of 2026-10-04:** Phase 1 (rename layer) and Phase 2 (Property → Product, §7) are complete. Phase 2 is not committed yet.
 > Commits: `d94035e feat: start migration process` → `26dce13 fix: modify project name into Petoria` (branch `develop`).
 > Related: [BACKEND_MIGRATION](BACKEND_MIGRATION.md) · [NEXT_STEPS](NEXT_STEPS.md)
 
@@ -68,3 +68,46 @@ The 20 lint errors already existed (unused vars, `await-thenable`, `no-unsafe-*`
 ## 6. Documentation
 
 - `docs/` created with `BACKEND_MIGRATION.md`, `DECISIONS.md`, `FRONTEND_MIGRATION.md`, `COMPLETED_TASKS.md`, `NEXT_STEPS.md` and `PROMPTS.md`. No source code changed.
+
+## 7. Phase 2: Property → Product (follows the ER model and `AGENTS.md`)
+
+Constraints: `MemberType` unchanged (`USER / AGENT / ADMIN`); no real-estate fields; existing module/DTO/enum/schema structure kept. Files moved with `git mv` so history is kept.
+
+### 7.1 Files
+
+| File | Change |
+|---|---|
+| `components/property/*` → `components/product/{product.module,product.service,product.resolver}.ts` | Renamed classes and methods. `shapeMatchQuery` now filters by type, species, gender, location, price, period and text (rooms, beds, square and options removed) |
+| `components/product/product.service.spec.ts` | **New**: 3 tests on the `getProducts` `$match` |
+| `libs/dto/property/*` → `libs/dto/product/{product,product.input,product.update}.ts` | ER fields; `speciesList` / `genderList` filters; `SquaresRange` removed |
+| `libs/enums/property.enum.ts` → `libs/enums/product.enum.ts` | `ProductType`, `ProductSpecies`, `ProductGender`, `ProductStatus`, `ProductLocation` |
+| `schemas/Property.model.ts` → `schemas/Product.model.ts` | Collection `products` |
+| `schemas/Member.model.ts`, `libs/dto/member/member.ts` | `memberProperties` → `memberProducts` |
+| `schemas/Notification.model.ts` | `propertyId` → `productId` (ref `Product`) |
+| `libs/enums/{like,view,comment,notification}.enum.ts` | `PROPERTY` → `PRODUCT` |
+| `libs/config.ts` | `availableProductSorts`; `availableOptions` removed; `favoriteProduct` / `visitedProduct` lookups |
+| `components/like/like.service.ts` | `getFavoriteProducts` (`from: 'products'`) |
+| `components/view/view.service.ts` | `getVisitedProducts` (`from: 'products'`) |
+| `components/comment/comment.{module,service}.ts` | `ProductModule` / `productStatsEditor('productComments')` |
+| `components/components.module.ts` | `ProductModule` |
+| `petoria-batch/src/batch.{module,service,controller}.ts`, `libs/config.ts` | Product model, `BATCH_TOP_PRODUCTS` / `batchTopProducts`, agent rank uses `memberProducts` |
+| `petoria-batch/src/lib/config.ts` | Deleted (duplicated `libs/config.ts`) |
+
+GraphQL operations: `createProduct`, `getProduct(productId)`, `updateProduct`, `getProducts`, `getFavorites`, `getVisited`, `getAgentProducts`, `likeTargetProduct(productId)`, `getAllProductsByAdmin`, `updateProductByAdmin`, `removeProductByAdmin(productId)`.
+
+### 7.2 Validation
+
+| Check | Result |
+|---|---|
+| `grep -rniE "propert" apps/` | ✅ 0 matches |
+| `npx tsc -p apps/petoria-api/tsconfig.app.json --noEmit` | ✅ pass |
+| `npx tsc -p apps/petoria-batch/tsconfig.app.json --noEmit` | ✅ pass |
+| `npm run build`, `npx nest build petoria-batch` | ✅ pass (after deleting the locked `dist/apps/petoria-*` incremental folders; see BACKEND_MIGRATION §8) |
+| `npx eslint "apps/**/*.ts"` | ✅ 20 errors, same as the baseline; the new spec is lint-clean |
+| `npx jest product.service` | ✅ 3/3 pass |
+| API boot | ✅ MongoDB connected (dev) |
+| GraphQL introspection | ✅ All 11 product operations present; no property operations. `ProductType` PET/FOOD/TOY/ACCESSORY, `ProductSpecies` DOG/CAT/BIRD/FISH, `ProductGender` MALE/FEMALE, `ProductStatus` ACTIVE/SOLD/DELETE, `CommentGroup` MEMBER/ARTICLE/PRODUCT, `MemberType` USER/AGENT/ADMIN |
+| `getProducts` with `typeList` / `speciesList` / `genderList` | ✅ Executes; returns an empty list (no product data in the dev DB yet) |
+| Batch boot | ✅ "BATCH SERVER IS READY", `GET /` = Petoria welcome |
+
+Not executed: write-path smoke tests (signup / create / like / comment) and the dev data migration. They were left out to avoid writing test data to the shared dev DB; see NEXT_STEPS P1–P2.

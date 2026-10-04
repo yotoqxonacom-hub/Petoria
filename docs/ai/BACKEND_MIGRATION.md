@@ -1,168 +1,168 @@
 # Backend Migration: Nestar → Petoria
 
-> **Status as of 2026-10-04:** Phase 1 (safe rename layer) is complete and committed (`26dce13`). Phase 2 (domain refactor) has not started.
+> **Status as of 2026-10-04:** Phase 1 (rename layer, `26dce13`) and Phase 2 (Property → Product, uncommitted working tree) are complete and validated.
+> Source of truth for domain rules: [`AGENTS.md`](../../AGENTS.md). If this file and `AGENTS.md` disagree, `AGENTS.md` wins.
 > Related: [DECISIONS](DECISIONS.md) · [COMPLETED_TASKS](COMPLETED_TASKS.md) · [NEXT_STEPS](NEXT_STEPS.md) · [FRONTEND_MIGRATION](FRONTEND_MIGRATION.md)
 
 ---
 
 ## 1. Original project summary (Nestar)
 
-Nestar is a real-estate listing platform built as a NestJS monorepo.
-
 | Aspect | Details |
 |---|---|
-| Monorepo | Nest CLI monorepo (`nest-cli.json` with `"monorepo": true`) and webpack builds |
-| Apps | `nestar-api`: GraphQL API. `nestar-batch`: cron jobs that compute rankings |
-| Stack | NestJS 10, `@nestjs/graphql` + Apollo Server 4 (code-first, `autoSchemaFile: true`), Mongoose 8, `@nestjs/jwt`, bcryptjs, class-validator, `graphql-upload-minimal`, `@nestjs/schedule`, `ws` (`WsAdapter`) |
-| Domain | `Property` listings (APARTMENT / VILLA / HOUSE) in Korean cities. Listings are created by `AGENT` members |
-| API modules | `auth`, `member`, `property`, `board-article`, `comment`, `like`, `view`, `follow`, `socket` (WebSocket chat) |
-| Schemas only (no module) | `Notice`, `Notification` |
-| Batch jobs | `BATCH_ROLLBACK`, `BATCH_TOP_PROPERTIES`, `BATCH_TOP_AGENTS` (daily at 01:00, 01:00:20 and 01:00:40) |
-| Env | `PORT_API`, `PORT_BATCH`, `MONGO_DEV`, `MONGO_PROD`, `SECRET_TOKEN` |
+| Monorepo | Nest CLI monorepo (`"monorepo": true`) with webpack builds |
+| Apps | `nestar-api` (GraphQL API), `nestar-batch` (cron jobs that compute rankings) |
+| Stack | NestJS 10, `@nestjs/graphql` + Apollo 4 (code-first), Mongoose 8, JWT, bcryptjs, class-validator, `graphql-upload-minimal`, `@nestjs/schedule`, `ws` |
+| Domain | Real-estate `Property` (APARTMENT / VILLA / HOUSE, beds/rooms/square, rent/barter) listed by `AGENT` members |
+| Modules | auth, member, property, board-article, comment, like, view, follow, socket |
 
 ## 2. New project summary (Petoria)
 
-Petoria is a petshop platform. Sellers list **pet products** (supplies) and **pets** (for sale or adoption), and buyers place **orders**. The community features (board articles, comments, likes, follows, views, chat) stay as they are.
+A petshop platform. `AGENT` members list **products**. A product is a pet, food, a toy or an accessory, and is tagged with a species and a gender. The community modules (board articles, comments, likes, follows, views, chat) are unchanged.
 
-| Aspect | Target |
+| Aspect | Current state |
 |---|---|
-| Apps | `petoria-api`, `petoria-batch` (**done**) |
-| Listing domains | `Product` (replaces `Property`), `Pet` (new) |
-| Commerce | `Order` and `OrderItem` (new) |
-| Roles | `USER`, `SELLER` (replaces `AGENT`), `ADMIN` |
-| Batch | Rank top products, top pets and top sellers |
+| Apps | `petoria-api`, `petoria-batch` |
+| Catalog entity | `Product` (single model; `PET` is one `productType` value) |
+| Roles | `MemberType.USER`, `AGENT`, `ADMIN`, **unchanged** (`AGENTS.md`) |
+| Batch | `BATCH_ROLLBACK`, `BATCH_TOP_PRODUCTS`, `BATCH_TOP_AGENTS` |
 
-## 3. Backend migration goal
-
-Turn the real-estate backend into a petshop backend in **phases**, so every phase builds, typechecks and runs on its own.
+## 3. Backend migration goal and phases
 
 | Phase | Scope | Breaks API? | Status |
 |---|---|---|---|
-| 1 | Safe rename layer: project and app identifiers Nestar → Petoria. No logic, API or DB changes | No | ✅ Done |
-| 2a | Cleanup: duplicate files, stale `dist`, existing lint errors, API e2e test | No | ⏳ Next |
-| 2b | Role rename `AGENT` → `SELLER` and the matching member counters | **Yes** | Planned |
-| 2c | `Property` → `Product` module | **Yes** | Planned |
-| 2d | New `Pet` module | Additive | Planned |
-| 2e | New `Order` / `OrderItem` module | Additive | Planned |
-| 2f | Rewire the shared modules (like, view, comment, notification) | **Yes** | Planned |
-| 2g | Batch jobs for products, pets and sellers | No (internal) | Planned |
+| 1 | Safe rename layer: project and app identifiers Nestar → Petoria | No | ✅ Done (`26dce13`) |
+| 2 | Property → Product across api + batch, following the ER model | **Yes** | ✅ Done (uncommitted) |
+| 3 | Cleanup: duplicate DTO, the 20 existing lint errors, API e2e test, Jest ESM (`uuid`) support | No | ⏳ Next |
+| 4 | Notice and Notification modules (schemas exist, no resolvers) | Additive | Not planned yet |
 
 ## 4. Naming changes
 
-### 4.1 Done (Phase 1)
-
-| Before | After | Where |
-|---|---|---|
-| `apps/nestar-api/` | `apps/petoria-api/` | folder (`git mv`) |
-| `apps/nestar-batch/` | `apps/petoria-batch/` | folder (`git mv`) |
-| Nest project keys `nestar-api` / `nestar-batch` | `petoria-api` / `petoria-batch` | `nest-cli.json` |
-| npm package `nestar` | `petoria` | `package.json`, `package-lock.json` |
-| `dist/apps/nestar-*` | `dist/apps/petoria-*` | `tsconfig.app.json` `outDir`, `start:prod*` scripts |
-| `nest start nestar-batch --watch` | `nest start petoria-batch --watch` | `start:dev:batch` |
-| `./apps/nestar-api/test/jest-e2e.json` | `./apps/petoria-api/test/jest-e2e.json` | `test:e2e` |
-| `'Welcome to Nestar Rest API Server!'` | `'Welcome to Petoria Rest API Server!'` | `petoria-api/src/app.service.ts` |
-| `'Welcome to Nestar BATCH Server!'` | `'Welcome to Petoria BATCH Server!'` | `petoria-batch/src/batch.service.ts` |
-| `../../nestar-api/src/...` imports | `../../petoria-api/src/...` | `petoria-batch/src/batch.module.ts`, `batch.service.ts` |
-
-### 4.2 Planned (Phase 2)
+### 4.1 Phase 1 (project identifiers)
 
 | Before | After |
 |---|---|
-| `MemberType.AGENT` | `MemberType.SELLER` |
-| `Property*` (class, DTO, enum, schema, service, resolver) | `Product*` |
-| `PropertyType` (APARTMENT, VILLA, HOUSE) | `ProductCategory` (FOOD, TOY, ACCESSORY, GROOMING, HEALTH, HOUSING) |
-| `PropertyStatus` (ACTIVE, SOLD, DELETE) | `ProductStatus` (ACTIVE, SOLD_OUT, DELETE) |
-| `PropertyLocation` | `PetLocation` (moves to the Pet domain) |
-| — | `PetSpecies` (DOG, CAT, BIRD, FISH, REPTILE, SMALL_ANIMAL), shared by Product and Pet |
-| `AgentsInquiry`, `availableAgentSorts` | `SellersInquiry`, `availableSellerSorts` |
-| `availablePropertySorts`, `availableOptions` | `availableProductSorts`, `availablePetSorts`, `availablePetOptions` |
-| `memberProperties` | `memberProducts`, `memberPets`, `memberOrders` |
-| `BATCH_TOP_PROPERTIES`, `BATCH_TOP_AGENTS` | `BATCH_TOP_PRODUCTS`, `BATCH_TOP_PETS`, `BATCH_TOP_SELLERS` |
-| `LikeGroup` / `ViewGroup` / `CommentGroup` / `NotificationGroup` value `PROPERTY` | `PRODUCT`, plus a new `PET` |
+| `apps/nestar-api`, `apps/nestar-batch` | `apps/petoria-api`, `apps/petoria-batch` |
+| npm package `nestar` | `petoria` |
+| Nest project keys, `dist/apps/nestar-*`, scripts | `petoria-*` |
+| Welcome strings | "Welcome to Petoria Rest API Server!" / "Welcome to Petoria BATCH Server!" |
 
-## 5. Module changes (planned)
+### 4.2 Phase 2 (domain)
 
-| Module | Change | Notes |
-|---|---|---|
-| `components/property` | **Replaced** by `components/product` | Mirror the files 1:1 (`*.module.ts`, `*.service.ts`, `*.resolver.ts`, `dto/product/*`, `schemas/Product.model.ts`, `enums/product.enum.ts`) |
-| `components/pet` | **New** | Same pattern and method set as product |
-| `components/order` | **New** | `OrderService` depends on `ProductService` (stock) and `MemberService` (counters) |
-| `components/member` | Changed | `getAgents` → `getSellers`; `@Roles(AGENT)` → `@Roles(SELLER)` everywhere |
-| `components/like` | Changed | `getFavoriteProperties` → `getFavoriteProducts` / `getFavoritePets` through one generic aggregation helper |
-| `components/view` | Changed | `getVisitedProperties` → `getVisitedProducts` / `getVisitedPets` |
-| `components/comment` | Changed | Imports `ProductModule` and `PetModule`. The `CommentGroup.PRODUCT` / `PET` paths call `productStatsEditor` / `petStatsEditor` |
-| `libs/config.ts` | Changed | `lookupFavorite` / `lookupVisit` take a field parameter. Sort allowlists are renamed |
-| `libs/dto/common/common.input.ts` | **New** | `OrdinaryInquiry` moves here from `dto/property/property.input.ts` |
-| `components.module.ts` | Changed | Imports `ProductModule`, `PetModule`, `OrderModule` |
-| `auth`, `board-article`, `follow`, `socket` | Unchanged | — |
-| `petoria-batch` | Changed | Registers the Product, Pet and Member schemas and adds a pets cron slot (`00 01 01 * * *`) |
-
-## 6. GraphQL changes (planned; the current schema is still Nestar-shaped)
-
-### 6.1 Operations
-
-| Current operation | Planned operation | Guard / role |
-|---|---|---|
-| `createProperty` | `createProduct`, `createPet` | `RolesGuard` SELLER |
-| `getProperty(propertyId)` | `getProduct(productId)`, `getPet(petId)` | `WithoutGuard` |
-| `updateProperty` | `updateProduct`, `updatePet` | SELLER |
-| `getProperties` | `getProducts`, `getPets` | `WithoutGuard` |
-| `getFavorites` | `getFavoriteProducts`, `getFavoritePets` | `AuthGuard` |
-| `getVisited` | `getVisitedProducts`, `getVisitedPets` | `AuthGuard` |
-| `getAgentProperties` | `getSellerProducts`, `getSellerPets` | SELLER |
-| `likeTargetProperty` | `likeTargetProduct`, `likeTargetPet` | `AuthGuard` |
-| `getAllPropertiesByAdmin` | `getAllProductsByAdmin`, `getAllPetsByAdmin` | ADMIN |
-| `updatePropertyByAdmin` | `updateProductByAdmin`, `updatePetByAdmin` | ADMIN |
-| `removePropertyByAdmin` | `removeProductByAdmin`, `removePetByAdmin` | ADMIN |
-| `getAgents` | `getSellers` | `WithoutGuard` |
-| — | `createOrder`, `getMyOrders`, `updateOrder` | `AuthGuard` |
-| — | `getAllOrdersByAdmin`, `updateOrderByAdmin` | ADMIN |
-| `signup`, `login`, `checkAuth`, `checkAuthRoles`, `getMember`, `updateMember`, `likeTargetMember`, `getAllMembersByAdmin`, `updateMembersByAdmin`, `imageUploader`, `imagesUploader` | Unchanged | — |
-| BoardArticle, Comment and Follow operations | Unchanged (only the group enum values change) | — |
-
-### 6.2 Types and inputs
-
-| Current | Planned |
+| Before | After |
 |---|---|
-| `Property`, `Properties` | `Product`, `Products`; `Pet`, `Pets` |
-| `PropertyInput`, `PropertyUpdate` | `ProductInput` / `ProductUpdate`, `PetInput` / `PetUpdate` |
-| `PropertiesInquiry`, `AgentPropertiesInquiry`, `AllPropertiesInquiry` | `ProductsInquiry` / `SellerProductsInquiry` / `AllProductsInquiry` (and the same set for Pet) |
-| `SquaresRange`, `roomsList`, `bedsList`, `options: [propertyBarter, propertyRent]` | Removed. Products add `categoryList`, `speciesList`, `inStock`. Pets add `speciesList`, `genderList`, `locationList`, `options: [petVaccinated, petNeutered]` |
-| `AgentsInquiry` | `SellersInquiry` |
-| — | `Order`, `Orders`, `OrderInput`, `OrderItemInput`, `OrderUpdate`, `OrdersInquiry`, enum `OrderStatus` |
-| Enum `MemberType { USER AGENT ADMIN }` | `MemberType { USER SELLER ADMIN }` |
+| `Property`, `Properties` | `Product`, `Products` |
+| `PropertyInput` / `PropertyUpdate` | `ProductInput` / `ProductUpdate` |
+| `PropertiesInquiry` / `AgentPropertiesInquiry` / `AllPropertiesInquiry` | `ProductsInquiry` / `AgentProductsInquiry` / `AllProductsInquiry` |
+| `PropertyType` (APARTMENT, VILLA, HOUSE) | `ProductType` (PET, FOOD, TOY, ACCESSORY) |
+| — | `ProductSpecies` (DOG, CAT, BIRD, FISH) |
+| — | `ProductGender` (MALE, FEMALE) |
+| `PropertyStatus` (ACTIVE, SOLD, DELETE) | `ProductStatus` (ACTIVE, SOLD, DELETE) |
+| `PropertyLocation` | `ProductLocation` (same city values) |
+| `availablePropertySorts` | `availableProductSorts` |
+| `availableOptions` (`propertyBarter`, `propertyRent`) | Removed |
+| `memberProperties` | `memberProducts` |
+| `LikeGroup` / `ViewGroup` / `CommentGroup` / `NotificationGroup` `.PROPERTY` | `.PRODUCT` |
+| `Notification.propertyId` | `Notification.productId` |
+| `PropertyService.propertyStatsEditor` | `ProductService.productStatsEditor` |
+| `LikeService.getFavoriteProperties`, `ViewService.getVisitedProperties` | `getFavoriteProducts`, `getVisitedProducts` |
+| `BATCH_TOP_PROPERTIES`, `batchTopProperties` | `BATCH_TOP_PRODUCTS`, `batchTopProducts` |
+| Unchanged | `MemberType.AGENT`, `getAgents`, `AgentsInquiry`, `availableAgentSorts`, `BATCH_TOP_AGENTS` |
 
-## 7. MongoDB collection and schema changes (planned)
+## 5. Module changes
 
-| Collection | Change | Fields |
+| Path | Change |
+|---|---|
+| `components/property/*` → `components/product/*` | `git mv` plus rename. Same module/service/resolver structure, guards and roles (`@Roles(MemberType.AGENT)`) |
+| `components/product/product.service.spec.ts` | **New** unit test for the `getProducts` `$match` filters |
+| `libs/dto/property/*` → `libs/dto/product/*` | Real-estate fields removed; species and gender added |
+| `libs/enums/property.enum.ts` → `product.enum.ts` | 5 enums, each with `registerEnumType` |
+| `schemas/Property.model.ts` → `Product.model.ts` | Collection `products` |
+| `components/like`, `components/view` | Product lookups (`from: 'products'`, aliases `favoriteProduct` / `visitedProduct`) |
+| `components/comment` | Depends on `ProductModule`. The `CommentGroup.PRODUCT` case increases `productComments` |
+| `components/components.module.ts` | `ProductModule` |
+| `libs/config.ts` | Sort allowlist, `lookupFavorite` / `lookupVisit` fields |
+| `petoria-batch` | Product schema/model, product rank job, agent rank uses `memberProducts` |
+| `petoria-batch/src/lib/` | Removed (it duplicated `libs/config.ts`) |
+
+## 6. GraphQL changes (applied)
+
+| Old operation | New operation | Guard / role |
 |---|---|---|
-| `properties` | **Retired**, replaced by `products` | — |
-| `products` | **New** | `productCategory`, `productSpecies`, `productStatus`, `productTitle`, `productBrand`, `productPrice`, `productStock`, `productImages`, `productDesc`, `productViews/Likes/Comments/Rank`, `memberId`, `soldOutAt`, `deletedAt`, timestamps. Unique index `{memberId, productTitle}` |
-| `pets` | **New** | `petSpecies`, `petBreed`, `petGender`, `petAgeMonths`, `petStatus` (ACTIVE / RESERVED / SOLD / DELETE), `petLocation`, `petTitle`, `petPrice`, `petImages`, `petDesc`, `petVaccinated`, `petNeutered`, `petViews/Likes/Comments/Rank`, `memberId`, `soldAt`, `deletedAt` |
-| `orders` | **New** | `orderTotal`, `orderDelivery`, `orderStatus` (PENDING / PAID / SHIPPED / DELIVERED / CANCELED / DELETE), `orderAddress`, `memberId` (buyer) |
-| `orderItems` | **New** | `orderId`, `productId`, `itemPrice` (price at order time), `itemQuantity` |
-| `members` | Changed | `memberType: AGENT` → `SELLER`; `memberProperties` → `memberProducts`; adds `memberPets`, `memberOrders` |
-| `likes`, `views`, `comments` | Data change | `likeGroup` / `viewGroup` / `commentGroup` `PROPERTY` → `PRODUCT` (or delete those rows) |
-| `notifications` | Changed | `propertyId` → `productId`; adds `petId`; group `PROPERTY` → `PRODUCT` |
-| `boardArticles`, `follows`, `notices` | Unchanged | — |
+| `createProperty` | `createProduct` | `RolesGuard` AGENT |
+| `getProperty(propertyId)` | `getProduct(productId)` | `WithoutGuard` |
+| `updateProperty` | `updateProduct` | AGENT |
+| `getProperties` | `getProducts` | `WithoutGuard` |
+| `getFavorites` | `getFavorites` (returns `Products`) | `AuthGuard` |
+| `getVisited` | `getVisited` (returns `Products`) | `AuthGuard` |
+| `getAgentProperties` | `getAgentProducts` | AGENT |
+| `likeTargetProperty(propertyId)` | `likeTargetProduct(productId)` | `AuthGuard` |
+| `getAllPropertiesByAdmin` | `getAllProductsByAdmin` | ADMIN |
+| `updatePropertyByAdmin` | `updateProductByAdmin` | ADMIN |
+| `removePropertyByAdmin(propertyId)` | `removeProductByAdmin(productId)` | ADMIN |
 
-Dev data migration, to run by hand with `mongosh` against `MONGO_DEV` **after** Phase 2b/2c ships. The application code does not run this.
+`ProductsInquiry.search` (PISearch):
+
+| Filter | Mongo `$match` |
+|---|---|
+| `memberId` | `memberId` (ObjectId) |
+| `typeList` | `productType: { $in }` |
+| `speciesList` | `productSpecies: { $in }` |
+| `genderList` | `productGender: { $in }` |
+| `locationList` | `productLocation: { $in }` |
+| `pricesRange` | `productPrice: { $gte, $lte }` |
+| `periodsRange` | `createdAt: { $gte, $lte }` |
+| `text` | `productTitle: { $regex, 'i' }` |
+
+Removed: `roomsList`, `bedsList`, `squaresRange` / `SquaresRange`, `options`. Admin search: `productStatus`, `productLocationList`. Agent search: `productStatus`.
+
+## 7. MongoDB collection and schema changes
+
+`products` (replaces `properties`) matches the ER model:
+
+| Field | Type | Required |
+|---|---|---|
+| `productType` | enum | ✔ |
+| `productSpecies` | enum | ✔ |
+| `productGender` | enum | ✔ |
+| `productStatus` | enum, default `ACTIVE` | ✔ |
+| `productLocation` | enum | ✔ |
+| `productTitle` | string | ✔ |
+| `productPrice` | number (double) | ✔ |
+| `productViews`, `productLikes`, `productComments`, `productRank` | int, default 0 | ✔ |
+| `productImages` | [string] | ✔ |
+| `productDesc` | string | |
+| `memberId` | ObjectId → `Member` | ✔ |
+| `soldAt`, `deletedAt` | date | |
+| `createdAt`, `updatedAt` | timestamps | ✔ |
+
+Unique index: `{ productType, productLocation, productTitle, productPrice }`. It carries over the old property index shape.
+
+Other collections:
+
+| Collection | Change |
+|---|---|
+| `members` | `memberProperties` → `memberProducts` |
+| `likes`, `views`, `comments`, `notifications` | Group value `PROPERTY` → `PRODUCT` |
+| `notifications` | `propertyId` → `productId` (ref `Product`). ⚠ The ER diagram still shows `propertyId`; update it |
+| `boardArticles`, `follows`, `notices` | Unchanged |
+
+Dev data migration. Run it by hand with `mongosh` against `MONGO_DEV`; the app does not run it:
 
 ```js
-db.members.updateMany({ memberType: 'AGENT' }, { $set: { memberType: 'SELLER' } });
 db.members.updateMany({}, { $rename: { memberProperties: 'memberProducts' } });
-db.members.updateMany({}, { $set: { memberPets: 0, memberOrders: 0 } });
 ['likes', 'views'].forEach((c) => db[c].deleteMany({ [c.slice(0, -1) + 'Group']: 'PROPERTY' }));
 db.comments.deleteMany({ commentGroup: 'PROPERTY' });
+db.notifications.deleteMany({ notificationGroup: 'PROPERTY' });
 db.properties.drop();
 ```
 
 ## 8. Compatibility notes
 
-- **Phase 1 is fully backward compatible.** The GraphQL schema, collection names, env keys and ports did not change, so the existing Nestar frontend still works against `petoria-api`.
-- **Phase 2b/2c/2f break the API.** Enum values (`AGENT`, `PROPERTY`) and operation names change. Ship the backend and the frontend together, or keep a temporary alias resolver for one release (not planned by default).
-- **Enum stored as data.** Mongoose enum validation rejects existing `AGENT` and `PROPERTY` documents on write once the enums change. Run the migration snippet first.
-- **Batch shares code with the API** through relative imports (`../../petoria-api/src/...`). Every schema or DTO rename in the API must be mirrored in `petoria-batch`.
-- **Unique index change.** The old `properties` index `{propertyType, propertyLocation, propertyTitle, propertyPrice}` is not carried over. `products` uses `{memberId, productTitle}`.
-- **Stale build output.** `dist/apps/nestar-*` still exists on disk (gitignored). The `start:prod*` scripts point to `dist/apps/petoria-*`.
-- **`start:prod`** uses the POSIX form `NODE_ENV=production node ...`, which does not work in Windows PowerShell or cmd. This is an existing issue and was not changed.
+- **Phase 2 breaks the GraphQL contract.** Operation names, the `propertyId` argument, `Property*` types and the `PROPERTY` enum values are gone. The frontend must switch at the same time (see [FRONTEND_MIGRATION](FRONTEND_MIGRATION.md)).
+- `MemberType` is unchanged, so existing JWTs and role checks keep working.
+- **Old data:** documents with `likeGroup` / `viewGroup` / `commentGroup` `PROPERTY` now fail Mongoose enum validation on write. Run the migration above.
+- `LikeGroup` and `ViewGroup` are registered enums, but no GraphQL type references them, so they don't appear in schema introspection. This is expected.
+- **Batch shares code with the API** through relative imports (`../../petoria-api/src/...`). Mirror any later schema or DTO rename in batch.
+- **Jest:** `uuid@14` is ESM-only, and the ts-jest setup can't load it. Specs that import `libs/config.ts` must call `jest.mock('uuid', ...)` (see `product.service.spec.ts`) until the Jest config is fixed.
+- **Windows/OneDrive:** `nest build` can fail with `EPERM rmdir dist/apps/petoria-*/petoria-*`. The fix is to delete `dist/apps/petoria-*` and rebuild.
